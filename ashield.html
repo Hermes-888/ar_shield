@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+    <!-- three.js library -->
+    <script src='js/three.min.js'></script>
+    <script src="js/GLTFLoader.js"></script>
+    <!-- ar.js -->
+    <script src="js/ar.min.js"></script>
+</head>
+<body style='margin : 0px; overflow: hidden; font-family: Monospace;'>
+    <div style='position: absolute; top: 10px; width:100%; text-align: center; z-index: 1;'><a href="https://github.com/jeromeetienne/AR.js/" target="_blank">AR.js</a> - three.js Contact me at <a href='https://twitter.com/jerome_etienne' target='_blank'>@jerome_etienne</a>
+    <br/>
+    <div id="output" style="font-size: 14px; font-weight: 600">Output</div>
+    </div>
+
+<script>
+	//////////////////////////////////////////////////////////////////////////////////
+	//		Init
+	//////////////////////////////////////////////////////////////////////////////////
+
+	// init renderer
+	var renderer	= new THREE.WebGLRenderer({
+		antialias: true,
+		alpha: true
+	});
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap
+    renderer.shadowMap.enabled = true;
+    
+	renderer.setClearColor(new THREE.Color('lightgrey'), 0);
+	renderer.setSize( 640, 480 );
+	renderer.domElement.style.position = 'absolute';
+	renderer.domElement.style.top = '0px';
+	renderer.domElement.style.left = '0px';
+    
+    renderer.domElement.addEventListener( 'mousedown', onMouseDown );
+	document.body.appendChild( renderer.domElement );
+    
+
+	// array of functions for the rendering loop
+	var onRenderFcts= [];
+
+	// init scene and camera
+	var scene = new THREE.Scene();
+    
+	//////////////////////////////////////////////////////////////////////////////////
+	//		Initialize a camera, perspective for interactivity
+	//////////////////////////////////////////////////////////////////////////////////
+	// Create a camera
+	//var camera = new THREE.Camera();//       FOV, aspect, near, far (hitTest)
+    var camera = new THREE.PerspectiveCamera( 60, window.innerWidth / window.innerHeight, 0.01, 100 );
+    //var camera = new THREE.PerspectiveCamera( 45, window.innerWidth / window.innerHeight, 0.2, 500 );
+	scene.add(camera);
+    
+    // intraction
+    var mouse = new THREE.Vector2();
+    var raycaster = new THREE.Raycaster();// onMouseDown(e)
+
+	////////////////////////////////////////////////////////////////////////////////
+	//          handle arToolkitSource
+	////////////////////////////////////////////////////////////////////////////////
+	var arToolkitSource = new THREEx.ArToolkitSource({
+		// read from the webcam 
+		sourceType : 'webcam'	
+	});
+
+	arToolkitSource.init(function onReady(){
+		onResize();
+	});
+	
+	// handle resize
+	window.addEventListener('resize', function(){
+		onResize();
+	});
+	function onResize(){
+		arToolkitSource.onResizeElement()	
+		arToolkitSource.copyElementSizeTo(renderer.domElement);
+		if( arToolkitContext.arController !== null ) {
+			arToolkitSource.copyElementSizeTo(arToolkitContext.arController.canvas);
+		}
+	}
+	////////////////////////////////////////////////////////////////////////////////
+	//          initialize arToolkitContext
+	////////////////////////////////////////////////////////////////////////////////
+	// create atToolkitContext
+	var arToolkitContext = new THREEx.ArToolkitContext({
+        cameraParametersUrl: 'js/camera_para.dat',
+		detectionMode: 'mono',
+	});
+	// initialize it
+	arToolkitContext.init(function onCompleted(){
+		// copy projection matrix to camera
+		camera.projectionMatrix.copy( arToolkitContext.getProjectionMatrix() );
+	});
+
+	// update artoolkit on every frame
+	onRenderFcts.push(function(){
+		if( arToolkitSource.ready === false ) { return; }
+
+		arToolkitContext.update( arToolkitSource.domElement );
+		
+		// update scene.visible if the marker is seen
+		scene.visible = camera.visible;
+	});
+		
+	////////////////////////////////////////////////////////////////////////////////
+	//          Create a ArMarkerControls
+	////////////////////////////////////////////////////////////////////////////////
+	
+	// init controls for camera
+	var markerControls = new THREEx.ArMarkerControls(arToolkitContext, camera, {
+		type : 'pattern',
+        patternUrl : 'js/patt.hiro',// the pattern to look for
+		//patternUrl : THREEx.ArToolkitContext.baseURL + '../data/data/patt.hiro',
+		// patternUrl : THREEx.ArToolkitContext.baseURL + '../data/data/patt.kanji',
+		// as we controls the camera, set changeMatrixMode: 'cameraTransformMatrix'
+		changeMatrixMode: 'cameraTransformMatrix'
+	});
+	// as we do changeMatrixMode: 'cameraTransformMatrix', start with invisible scene
+	scene.visible = false;
+
+	//////////////////////////////////////////////////////////////////////////////////
+	//		add gltf mesh in the scene
+	//////////////////////////////////////////////////////////////////////////////////
+
+    //https://threejs.org/docs/#api/en/lights/AmbientLight
+    //scene.add( new THREE.AmbientLight( 0x404040, 3.2 ) );
+//    scene.add( new THREE.AmbientLight( 0xffffff, 1.0 ) );
+
+                    //color, intensity, distance, angle, penumbra, decay
+    var directionalLight = new THREE.DirectionalLight( 'white', 1 );
+	directionalLight.position.set( 1, 2, 0.3 ).setLength(2);
+	directionalLight.shadow.mapSize.set(256, 256);//(128,128);
+	directionalLight.shadow.camera.bottom = -0.6;
+	directionalLight.shadow.camera.top = 0.6;
+	directionalLight.shadow.camera.right = 0.6;
+	directionalLight.shadow.camera.left = -0.6;
+	directionalLight.castShadow = true;
+	// scene.add(new THREE.CameraHelper( directionalLight.shadow.camera ))
+	scene.add( directionalLight );
+
+    
+    //use Blender2.8 principled BSDF node w/image texture then export as gltf 2
+    // light in gltf scene not showing
+    var plane;// interaction
+    var output = document.getElementById('output');
+    var meshes = [];
+    var model;// access to gltf.scene
+    var loader = new THREE.GLTFLoader();
+    loader.load('models/sfs_logo_shield90.glb', function ( gltf ) {
+
+        model=gltf;
+        gltf.scene.traverse(function( child ) {
+
+            if ( child.isMesh ) {
+                //child.material.envMap = envMap;
+                child.castShadow = true;
+                child.receiveShadow = true;
+                //console.log('child:', child.name);
+                if (child.name !== "Plane") {
+                    meshes.push(child);
+                } else {
+                    //test: scale to cover marker or hide?
+                    //child.material.transparent = true;
+                    child.scale.set(4, 4, 4);
+                    plane = child;// for interaction
+                }
+            }
+            
+        });
+        
+//tests
+        //gltf.scene.scale.set(0.6, 0.6, 0.6);
+//        gltf.scene.rotation.set(-90, 0, 0);// parallel to marker
+//        model.scene.children[0].position.y -= 0.5;// recenter on marker        
+//        model.scene.children[1].position.y -= 0.5;
+        // add a white plane below for shadow and to hide marker?
+        
+        directionalLight.target = model.scene;
+        scene.add( gltf.scene );
+        
+        onRenderFcts.push(function(delta) {
+            //model.scene.rotation.x += Math.PI*delta;
+//            model.scene.children[0].rotation.y += 0.01;// animated
+//            model.scene.children[1].rotation.y += 0.01;// spin
+            //shield90.glb // animated spin
+            meshes.forEach(function(child) {
+                child.rotation.z -= 0.03;
+            });
+            //model.scene.children[0].rotation.z -= 0.02;
+            //model.scene.children[1].rotation.z -= 0.02;
+        });
+        console.log('model:', model);
+        console.log('meshes:', meshes);//Scene, shield-red, shield-white
+    });
+	
+	
+
+	//////////////////////////////////////////////////////////////////////////////////
+	//		render the whole thing on the page
+	//////////////////////////////////////////////////////////////////////////////////
+
+	// render the scene
+    onRenderFcts.push(function() { renderer.render( scene, camera ) } );
+
+	// run the rendering loop
+	var lastTimeMsec= null;
+	requestAnimationFrame(function animate(nowMsec){
+		// keep looping
+		requestAnimationFrame( animate );
+		// measure time
+		lastTimeMsec	= lastTimeMsec || nowMsec-1000/60;
+		var deltaMsec	= Math.min(200, nowMsec - lastTimeMsec);
+		lastTimeMsec	= nowMsec;
+		// call each update function
+		onRenderFcts.forEach(function(onRenderFct){
+			onRenderFct(deltaMsec/1000, nowMsec/1000);
+		});
+	});
+    
+    function onMouseDown( e ) {
+        // calculate mouse position in normalized device coordinates (-1 to +1) for both components
+        mouse.x = ( e.clientX / window.innerWidth ) * 2 - 1;
+        mouse.y = - ( e.clientY / window.innerHeight ) * 2 + 1;
+
+        // update the ray with the camera and mouse position
+        raycaster.setFromCamera( mouse, camera );
+
+        // calculate objects intersecting the ray
+        var intersects = raycaster.intersectObjects( model.scene.children );
+
+        if (intersects.length) {
+            //console.log('intersects:', intersects);// all under mouse
+            console.log('clicked:', intersects[0].object.name);
+            output.innerHTML = 'Clicked '+intersects[0].object.name;
+            // interactio for now...
+            plane.visible = !plane.visible;
+        }
+    }
+</script>
+</body>
+</html>
